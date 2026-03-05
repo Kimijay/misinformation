@@ -1,11 +1,43 @@
 import json
 import glob
+import os
 from collections import defaultdict, deque
 from statistics import mean, median
 import matplotlib.pyplot as plt
+from matplotlib import font_manager, rcParams
 
 MIS_PATTERNS = ['data_by_type/jsonl/misinformation.jsonl']
 VER_PATTERNS = ['data_by_type/jsonl/verified_information.part.*.jsonl']
+
+
+def setup_chinese_font():
+    """Try to set a Chinese-capable font for titles/headers."""
+    candidates = [
+        'Noto Sans CJK SC', 'Noto Sans CJK JP', 'Noto Sans SC', 'Source Han Sans SC',
+        'Microsoft YaHei', 'SimHei', 'WenQuanYi Zen Hei', 'PingFang SC'
+    ]
+    # Try loading common CJK font files first.
+    font_files = [
+        '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
+        '/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc',
+        '/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc',
+    ]
+    for fp in font_files:
+        if os.path.exists(fp):
+            try:
+                font_manager.fontManager.addfont(fp)
+            except Exception:
+                pass
+
+    installed = {f.name for f in font_manager.fontManager.ttflist}
+    for name in candidates:
+        if name in installed:
+            rcParams['font.sans-serif'] = [name, 'DejaVu Sans']
+            rcParams['axes.unicode_minus'] = False
+            return name
+    # Fallback: keep default if no Chinese font found.
+    rcParams['axes.unicode_minus'] = False
+    return None
 
 
 def iter_records(patterns):
@@ -113,7 +145,30 @@ def draw_table(table_data, col_labels, title, out_path, fig_size=(16, 4.5), font
     )
     table.auto_set_font_size(False)
     table.set_fontsize(font_size)
-    table.scale(1, 1.6)
+    table.scale(1, 1.55)
+
+    # 三线表样式：默认无边框，仅保留顶部线、表头下线、底部线。
+    cells = table.get_celld()
+    rows = len(table_data) + 1  # + header
+    cols = len(col_labels)
+
+    for (r, c), cell in cells.items():
+        cell.set_linewidth(0.0)
+        cell.visible_edges = ''
+        cell.set_edgecolor('black')
+
+    # top rule + mid rule on header row
+    for c in range(cols):
+        hcell = cells[(0, c)]
+        hcell.visible_edges = 'TB'
+        hcell.set_linewidth(1.1)
+
+    # bottom rule on last row
+    for c in range(cols):
+        bcell = cells[(rows - 1, c)]
+        bcell.visible_edges = 'B'
+        bcell.set_linewidth(1.1)
+
     plt.title(title, fontsize=14, pad=14)
     plt.tight_layout()
     plt.savefig(out_path, dpi=300, bbox_inches='tight')
@@ -121,18 +176,24 @@ def draw_table(table_data, col_labels, title, out_path, fig_size=(16, 4.5), font
 
 
 def main():
+    font_used = setup_chinese_font()
+    if font_used:
+        print(f'Using font: {font_used}')
+    else:
+        print('Warning: No dedicated Chinese font found; rendering may depend on environment defaults.')
+
     mis = collect(MIS_PATTERNS)
     ver = collect(VER_PATTERNS)
 
     # Table 1
     metrics = [
-        ('Repost nodes', 'repost_nodes', 'Verified > Misinformation (typical)'),
-        ('Repost edges', 'repost_edges', 'Verified > Misinformation'),
-        ('Cascade depth', 'depth', 'Verified > Misinformation (mean)'),
-        ('Max layer width', 'width', 'Verified > Misinformation'),
-        ('Comment threads', 'comment_threads', 'Verified > Misinformation'),
-        ('Comment nodes', 'comment_nodes', 'Verified > Misinformation'),
-        ('Comment edges', 'comment_edges', 'Verified > Misinformation'),
+        ('转发节点数', 'repost_nodes', '真实信息更高（常态）'),
+        ('转发边数', 'repost_edges', '真实信息更高'),
+        ('传播深度', 'depth', '真实信息更高（均值）'),
+        ('最大层宽', 'width', '真实信息更高'),
+        ('评论线程数', 'comment_threads', '真实信息更高'),
+        ('评论节点数', 'comment_nodes', '真实信息更高'),
+        ('评论边数', 'comment_edges', '真实信息更高'),
     ]
 
     t1 = []
@@ -141,8 +202,8 @@ def main():
 
     draw_table(
         table_data=t1,
-        col_labels=['Metric', 'Misinformation (N=7560)\nMean / Median / P90 / Max', 'Verified (N=8317)\nMean / Median / P90 / Max', 'Direction'],
-        title='Table 1. Descriptive statistics of propagation structure metrics',
+        col_labels=['指标', '虚假信息（N=7560）\n均值/中位数/P90/最大值', '真实信息（N=8317）\n均值/中位数/P90/最大值', '差异方向'],
+        title='表1 真假信息传播结构指标描述统计',
         out_path='docs/figures/rq1_table1.png',
         fig_size=(18, 5.8)
     )
@@ -158,20 +219,20 @@ def main():
     ver_large100 = sum(v >= 100 for v in ver['repost_nodes']) / len(ver['repost_nodes'])
 
     t2 = [
-        ['Share with repost nodes = 0', f'{mis_repost0:.2%}', f'{ver_repost0:.2%}', 'Misinformation more likely to fail diffusion'],
-        ['Share with comment nodes = 0', f'{mis_comment0:.2%}', f'{ver_comment0:.2%}', 'Misinformation more likely to fail discussion'],
-        ['Share with depth >= 3', f'{mis_deep3:.2%}', f'{ver_deep3:.2%}', 'Verified more likely to be multi-layer cascades'],
-        ['Share with repost nodes >= 100', f'{mis_large100:.2%}', f'{ver_large100:.2%}', 'Verified more often large-scale diffusion'],
-        ['Max repost nodes', f"{max(mis['repost_nodes'])}", f"{max(ver['repost_nodes'])}", 'Misinformation has higher tail extreme'],
-        ['Max cascade depth', f"{max(mis['depth'])}", f"{max(ver['depth'])}", 'Misinformation can have deeper single cases'],
+        ['转发节点数=0 占比', f'{mis_repost0:.2%}', f'{ver_repost0:.2%}'],
+        ['评论节点数=0 占比', f'{mis_comment0:.2%}', f'{ver_comment0:.2%}'],
+        ['深传播（深度≥3）占比', f'{mis_deep3:.2%}', f'{ver_deep3:.2%}'],
+        ['大规模扩散（转发节点≥100）占比', f'{mis_large100:.2%}', f'{ver_large100:.2%}'],
+        ['最大转发节点', f"{max(mis['repost_nodes'])}", f"{max(ver['repost_nodes'])}"],
+        ['最大传播深度', f"{max(mis['depth'])}", f"{max(ver['depth'])}"],
     ]
 
     draw_table(
         table_data=t2,
-        col_labels=['Risk / structure metric', 'Misinformation', 'Verified', 'Interpretation'],
-        title='Table 2. Structural risk and failure-rate comparison',
+        col_labels=['风险/结构指标', '虚假信息', '真实信息'],
+        title='表2 真假信息结构风险与失败率比较',
         out_path='docs/figures/rq1_table2.png',
-        fig_size=(16, 4.8)
+        fig_size=(14, 4.8)
     )
 
     print('Generated: docs/figures/rq1_table1.png')
